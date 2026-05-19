@@ -27,7 +27,8 @@ Add the dependency to your `pubspec.yaml`:
 dependencies:
   flutter_stft_fft_plugin:
     git:
-      url: https://github.com/eric/flutter_stft_fft_plugin.git
+      url: https://github.com/Nam-Younghoon/flutter-stft-fft-plugin.git
+      ref: main
 ```
 
 ## API
