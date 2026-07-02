@@ -19,6 +19,11 @@ A native FFT/STFT Flutter plugin built on KissFFT. The high-performance signal p
 | iOS | 12.0 | CocoaPods |
 | Android | API 24 | CMake |
 
+## Reference docs
+
+- [STFT / FFT amplitude · dB convention](docs/STFT_FFT_AMPLITUDE_CONVENTION.md) — amplitude definitions, the dB conversion formula, the `isAcc` unit assumption, and where ENBW correction is applied; everything you need to compare result dB values against the ISO 1683 standard.
+- [v0.0.2 test results](docs/test_results_v0.0.2.md) — regression/new test pass log after the Welch RMS-convention fix.
+
 ## Installation
 
 Add the dependency to your `pubspec.yaml`:
@@ -69,6 +74,7 @@ final result = StftFftPlugin.computeWelchSpectrum(
 
 final frequencies = result['frequencies'] as Float64List;
 final magnitudes = result['magnitudes'] as Float64List; // dB
+final amplitude = result['amplitude'] as Float64List;   // linear amplitude before dB conversion (RMS convention)
 ```
 
 ### Magnitude Spectrum
@@ -93,6 +99,9 @@ final result = StftFftPlugin.computeStftSpectrogram(
   samplingFrequency: 44100.0,
   isAcc: false,
   dbRef: 2.0e-5,
+  weightingType: 0,            // 0=none, 1=A, 2=B, 3=C weighting
+  overlapPercent: 50.0,        // Window overlap (%) — hop=chunk/2 at 50
+  rmsRangeMultiplier: 1.0,     // RMS smoothing range (1=no smoothing)
   targetWidth: 800,            // Output pixel width
   targetHeight: 400,           // Output pixel height
   startFreqHz: 20.0,
@@ -110,6 +119,9 @@ final spectrogram = result['spectrogram'] as Float64List; // dB spectrogram
 final pixels = result['pixels'] as Uint8List;             // RGBA pixel buffer
 final pixelWidth = result['pixelWidth'] as int;
 final pixelHeight = result['pixelHeight'] as int;
+final amplitude = result['amplitude'] as Float64List;     // linear amplitude on the raw grid (ampRows×ampCols)
+final ampRows = result['ampRows'] as int;                 // = num_frames
+final ampCols = result['ampCols'] as int;                 // = num_bins
 ```
 
 ### Filtering and pixel regeneration
@@ -180,13 +192,16 @@ flutter_stft_fft_plugin/
 │   ├── fft_engine.c                       # FFT engine
 │   ├── welch_method.c                     # Welch's Method
 │   ├── stft_pipeline.c                    # STFT pipeline
+│   ├── signal_helpers.c                   # Shared frequency-weighting · RMS-smoothing helpers
+│   ├── signal_helpers.h                   # Shared helper declarations
 │   ├── CMakeLists.txt                     # Android / desktop build
 │   └── kissfft/                           # KissFFT library
 ├── ios/
 │   └── flutter_stft_fft_plugin.podspec    # iOS build configuration
 ├── android/
 │   └── build.gradle                       # Android build configuration
-├── test/                                  # C unit tests
+├── test/                                  # C unit tests (CMake + ctest)
+├── docs/                                  # amplitude convention · test results
 └── ffigen.yaml                            # FFI binding generator config
 ```
 

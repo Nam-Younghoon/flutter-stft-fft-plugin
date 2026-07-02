@@ -1,5 +1,6 @@
 #include "../../src/stft_fft_plugin.c"
 #include "../../src/fft_engine.c"
+#include "../../src/signal_helpers.c"
 #include "../../src/welch_method.c"
 #include "../../src/stft_pipeline.c"
 #include "../../src/kissfft/kiss_fft.c"

@@ -2,6 +2,7 @@
 #include "stft_fft_plugin.h"
 #include "kissfft/kiss_fft.h"
 #include "kissfft/kiss_fftr.h"
+#include "signal_helpers.h"
 #include <math.h>
 #include <string.h>
 
@@ -15,43 +16,8 @@ static int next_power_of_two(int n) {
     return p;
 }
 
-static double get_weighting_db(double f, int32_t weighting_type) {
-    if (f <= 0.0) return -200.0;
-
-    double f2 = f * f;
-    double f4 = f2 * f2;
-    double c12194_sq = 12194.0 * 12194.0;
-
-    switch (weighting_type) {
-    case 1: { /* A-weighting */
-        double num = c12194_sq * f4;
-        double den = (f2 + 20.6 * 20.6) *
-                     (f2 + c12194_sq) *
-                     sqrt((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9));
-        if (den == 0.0) return -200.0;
-        double ra = num / den;
-        return 20.0 * log10(ra) + 2.0;
-    }
-    case 2: { /* B-weighting */
-        double num = c12194_sq * f * f2;
-        double den = (f2 + 20.6 * 20.6) *
-                     (f2 + c12194_sq) *
-                     sqrt(f2 + 158.5 * 158.5);
-        if (den == 0.0) return -200.0;
-        double rb = num / den;
-        return 20.0 * log10(rb) + 0.17;
-    }
-    case 3: { /* C-weighting */
-        double num = c12194_sq * f2;
-        double den = (f2 + 20.6 * 20.6) * (f2 + c12194_sq);
-        if (den == 0.0) return -200.0;
-        double rc = num / den;
-        return 20.0 * log10(rc) + 0.06;
-    }
-    default:
-        return 0.0;
-    }
-}
+/* get_weighting_db, apply_rms_smoothing 는 signal_helpers.c 로 추출됨 (ADR-002).
+ * STFT 와 Welch 가 동일 정의를 공유하기 위한 단일 소스화. */
 
 FFI_PLUGIN_EXPORT WelchResult* compute_welch_spectrum(
     const double* input,
@@ -85,9 +51,14 @@ FFI_PLUGIN_EXPORT WelchResult* compute_welch_spectrum(
     if (!window) return NULL;
     generate_hanning_window(window, chunk_size);
 
-    double window_energy_sum = 0.0;
+    /* coherent gain (CG = Σw[i]). 단일 정현파 amplitude 복원 normalization 의 기준.
+     * 이전엔 window energy (Σw²) 를 썼는데, 그 식은 정현파 A 입력 시 amplitude 가
+     * A·√(N/3) 만큼 부풀려져 STFT (RMS convention) 와 약 +43 dB (N=32768) 격차 발생.
+     * 현 식은 정현파 A → A/√2 (RMS) 를 산출하여 STFT 와 단위 통일.
+     * 자세한 유도는 docs/STFT_FFT_AMPLITUDE_CONVENTION.md 참고. */
+    double coh_gain = 0.0;
     for (int i = 0; i < chunk_size; i++) {
-        window_energy_sum += window[i] * window[i];
+        coh_gain += window[i];
     }
 
     /* 3. FFT setup */
@@ -132,14 +103,15 @@ FFI_PLUGIN_EXPORT WelchResult* compute_welch_spectrum(
     if (!amplitude) { free(power_sum); return NULL; }
 
     double inv_frame_count = 1.0 / (double)frame_count;
-    double inv_window_energy = (window_energy_sum > 0.0) ? (1.0 / window_energy_sum) : 1.0;
+    double inv_cg2 = (coh_gain > 0.0) ? (1.0 / (coh_gain * coh_gain)) : 1.0;
 
     for (int i = 0; i < num_bins; i++) {
-        double power = power_sum[i] * inv_frame_count * inv_window_energy;
-        if (i != 0 && i != num_bins - 1) {
-            power *= 2.0;
-        }
-        amplitude[i] = sqrt(power);
+        double mean_pwr = power_sum[i] * inv_frame_count;
+        /* single-sided doubling: non-edge bin (DC/Nyquist 제외) 에만 ×2 */
+        double factor = (i != 0 && i != num_bins - 1) ? 2.0 : 1.0;
+        amplitude[i] = sqrt(mean_pwr * factor * inv_cg2);
+        /* 정현파 A 입력 → main bin amplitude = A/√2 (RMS).
+         * STFT (stft_pipeline.c) 와 동일 convention. */
     }
     free(power_sum);
 
@@ -153,29 +125,11 @@ FFI_PLUGIN_EXPORT WelchResult* compute_welch_spectrum(
         }
     }
 
-    /* 7. RMS smoothing */
+    /* 7. RMS smoothing (signal_helpers 로 추출됨, ADR-002).
+     * 동작은 추출 전과 동일: smooth_bins<=1 이면 no-op. */
     int smooth_bins = (int)(rms_range_multiplier);
-    double* smoothed;
-    if (smooth_bins > 1) {
-        smoothed = (double*)malloc(num_bins * sizeof(double));
-        if (!smoothed) { free(amplitude); return NULL; }
-
-        int half_bins = smooth_bins / 2;
-        for (int i = 0; i < num_bins; i++) {
-            double sum_sq = 0.0;
-            int count = 0;
-            for (int j = i - half_bins; j <= i + half_bins; j++) {
-                if (j >= 0 && j < num_bins) {
-                    sum_sq += amplitude[j] * amplitude[j];
-                    count++;
-                }
-            }
-            smoothed[i] = (count > 0) ? sqrt(sum_sq / (double)count) : 0.0;
-        }
-        free(amplitude);
-    } else {
-        smoothed = amplitude;
-    }
+    apply_rms_smoothing(amplitude, num_bins, smooth_bins);
+    double* smoothed = amplitude;
 
     /* 8. dB conversion */
     WelchResult* result = (WelchResult*)malloc(sizeof(WelchResult));
@@ -184,6 +138,9 @@ FFI_PLUGIN_EXPORT WelchResult* compute_welch_spectrum(
     result->frequencies = (double*)malloc(num_bins * sizeof(double));
     result->magnitudes = (double*)malloc(num_bins * sizeof(double));
     result->bin_count = num_bins;
+    /* [이슈 #2 / ADR-003] free_welch_result 에서 안전하게 free 하기 위해 amplitude 를 NULL 로 초기화. */
+    result->amplitude = NULL;
+    result->amp_count = 0;
 
     if (!result->frequencies || !result->magnitudes) {
         free(smoothed);
@@ -204,7 +161,9 @@ FFI_PLUGIN_EXPORT WelchResult* compute_welch_spectrum(
         result->magnitudes[i] = (x > 0.0) ? db_offset + factor * log(x) : -200.0;
     }
 
-    free(smoothed);
+    /* [이슈 #2] smoothed (= amplitude 의 별칭) 의 소유권을 result 에 양도. free 하지 않음. */
+    result->amplitude = smoothed;
+    result->amp_count = num_bins;
     return result;
 }
 
@@ -212,5 +171,6 @@ FFI_PLUGIN_EXPORT void free_welch_result(WelchResult* result) {
     if (!result) return;
     free(result->frequencies);
     free(result->magnitudes);
+    free(result->amplitude);
     free(result);
 }

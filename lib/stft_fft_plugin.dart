@@ -100,6 +100,7 @@ class StftFftPlugin {
       return {
         'frequencies': Float64List(0),
         'magnitudes': Float64List(0),
+        'amplitude': Float64List(0),
       };
     }
 
@@ -112,11 +113,19 @@ class StftFftPlugin {
     frequencies.setAll(0, freqList);
     magnitudes.setAll(0, magList);
 
+    // [이슈 #2] dB 변환 직전 단계의 선형 amplitude 사본.
+    final ampCount = result.ref.amp_count;
+    final amplitude = Float64List(ampCount);
+    if (ampCount > 0) {
+      amplitude.setAll(0, result.ref.amplitude.asTypedList(ampCount));
+    }
+
     nativeBindings.free_welch_result(result);
 
     return {
       'frequencies': frequencies,
       'magnitudes': magnitudes,
+      'amplitude': amplitude,
     };
   }
 
@@ -165,6 +174,12 @@ class StftFftPlugin {
     required double samplingFrequency,
     required bool isAcc,
     required double dbRef,
+    // [ADR-002] 분석 조건 — FFT/STFT 가 동일 조건 위에 놓이도록.
+    // weightingType=0/overlapPercent=50/rmsRangeMultiplier=1 일 때
+    // 변경 전 동작 (linear, hop=chunk/2, no smoothing) 과 byte-exact 동등.
+    required int weightingType,
+    required double overlapPercent,
+    required double rmsRangeMultiplier,
     required int targetWidth,
     required int targetHeight,
     required double startFreqHz,
@@ -190,6 +205,9 @@ class StftFftPlugin {
       samplingFrequency,
       isAcc ? 1 : 0,
       dbRef,
+      weightingType,
+      overlapPercent,
+      rmsRangeMultiplier,
       targetWidth,
       targetHeight,
       startFreqHz,
@@ -212,6 +230,9 @@ class StftFftPlugin {
         'spectrogram': Float64List(0),
         'specRows': 0,
         'specCols': 0,
+        'amplitude': Float64List(0),
+        'ampRows': 0,
+        'ampCols': 0,
         'pixels': Uint8List(0),
         'pixelWidth': 0,
         'pixelHeight': 0,
@@ -225,6 +246,15 @@ class StftFftPlugin {
     final specTotal = specRows * specCols;
     final spectrogram = Float64List(specTotal);
     spectrogram.setAll(0, result.ref.spectrogram.asTypedList(specTotal));
+
+    // [이슈 #2] dB 변환 직전 단계의 선형 amplitude 사본 (spectrogram 과 동일 grid).
+    final ampRows = result.ref.amp_rows;
+    final ampCols = result.ref.amp_cols;
+    final ampTotal = ampRows * ampCols;
+    final amplitude = Float64List(ampTotal);
+    if (ampTotal > 0) {
+      amplitude.setAll(0, result.ref.amplitude.asTypedList(ampTotal));
+    }
 
     final pixelWidth = result.ref.pixel_width;
     final pixelHeight = result.ref.pixel_height;
@@ -241,6 +271,9 @@ class StftFftPlugin {
       'spectrogram': spectrogram,
       'specRows': specRows,
       'specCols': specCols,
+      'amplitude': amplitude,
+      'ampRows': ampRows,
+      'ampCols': ampCols,
       'pixels': pixels,
       'pixelWidth': pixelWidth,
       'pixelHeight': pixelHeight,

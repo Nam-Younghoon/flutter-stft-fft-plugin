@@ -166,6 +166,9 @@ class StftFftPluginBindings {
     double sampling_frequency,
     int is_acc,
     double db_ref,
+    int weighting_type,
+    double overlap_percent,
+    double rms_range_multiplier,
     int target_width,
     int target_height,
     double start_freq_hz,
@@ -186,6 +189,9 @@ class StftFftPluginBindings {
       sampling_frequency,
       is_acc,
       db_ref,
+      weighting_type,
+      overlap_percent,
+      rms_range_multiplier,
       target_width,
       target_height,
       start_freq_hz,
@@ -211,6 +217,9 @@ class StftFftPluginBindings {
               ffi.Int32,
               ffi.Double,
               ffi.Int32,
+              ffi.Double,
+              ffi.Double,
+              ffi.Int32,
               ffi.Int32,
               ffi.Double,
               ffi.Double,
@@ -230,6 +239,9 @@ class StftFftPluginBindings {
               int,
               double,
               int,
+              double,
+              int,
+              double,
               double,
               int,
               int,
@@ -424,6 +436,14 @@ final class WelchResult extends ffi.Struct {
 
   @ffi.Int32()
   external int bin_count;
+
+  /// [이슈 #2 / ADR-003] dB 변환 직전 단계의 선형 amplitude.
+  /// Hanning + 윈도우 정규화 + RMS 스케일 + weighting + RMS smoothing 적용 후, ENBW 보정 전.
+  /// df·N 범위 RMS 평균 계산을 위해 외부에 노출. amp_count == bin_count.
+  external ffi.Pointer<ffi.Double> amplitude;
+
+  @ffi.Int32()
+  external int amp_count;
 }
 
 /// ── STFT Pipeline (stft_pipeline.c) ──
@@ -435,6 +455,17 @@ final class StftResult extends ffi.Struct {
 
   @ffi.Int32()
   external int spec_cols;
+
+  /// [이슈 #2 / ADR-003] dB 변환 직전 단계의 선형 amplitude.
+  /// spectrogram 과 동일한 bilinear_resample 통과 후. amp_rows == spec_rows, amp_cols == spec_cols.
+  /// 변환 일관성(amplitude→dB == spectrogram, 1e-6 이내) 은 target 이 raw grid 와 일치할 때만 1:1 보장.
+  external ffi.Pointer<ffi.Double> amplitude;
+
+  @ffi.Int32()
+  external int amp_rows;
+
+  @ffi.Int32()
+  external int amp_cols;
 
   external ffi.Pointer<ffi.Uint8> pixels;
 

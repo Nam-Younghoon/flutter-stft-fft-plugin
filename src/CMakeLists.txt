@@ -6,6 +6,7 @@ add_library(stft_fft_plugin SHARED
   "fft_engine.c"
   "welch_method.c"
   "stft_pipeline.c"
+  "signal_helpers.c"
   "kissfft/kiss_fft.c"
   "kissfft/kiss_fftr.c"
 )
